@@ -1,0 +1,99 @@
+from app.database.connection import get_connection
+
+
+def get_vehicles():
+    conn = get_connection()
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT vehicle_id, capacity
+                FROM vehicles
+                ORDER BY vehicle_id;
+            """)
+
+            return cursor.fetchall()
+
+    finally:
+        conn.close()
+
+
+def add_vehicle(capacity):
+    conn = get_connection()
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO vehicles (capacity)
+                VALUES (%s)
+                RETURNING vehicle_id, capacity;
+            """, (capacity,))
+
+            vehicle = cursor.fetchone()
+            conn.commit()
+
+            return vehicle
+
+    finally:
+        conn.close()
+
+
+def get_customers():
+    conn = get_connection()
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    customer_id,
+                    demand,
+                    earliest,
+                    latest,
+                    service_time,
+                    ST_Y(location) AS latitude,
+                    ST_X(location) AS longitude
+                FROM customers
+                ORDER BY customer_id;
+            """)
+
+            return cursor.fetchall()
+
+    finally:
+        conn.close()
+
+
+def add_customer(demand, earliest, latest, service_time, latitude, longitude):
+    conn = get_connection()
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO customers
+                    (demand, earliest, latest, service_time, location)
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    ST_SetSRID(
+                        ST_MakePoint(%s, %s),
+                        4326
+                    )
+                )
+                RETURNING customer_id;
+            """, (
+                demand,
+                earliest,
+                latest,
+                service_time,
+                longitude,
+                latitude
+            ))
+
+            customer_id = cursor.fetchone()[0]
+            conn.commit()
+
+            return customer_id
+
+    finally:
+        conn.close()
