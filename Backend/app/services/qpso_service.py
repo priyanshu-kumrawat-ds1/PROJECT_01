@@ -1,9 +1,14 @@
 import numpy as np
 
-from app.database.queries import get_customers_by_ids
+from app.database.queries import (
+    get_customers_by_ids,
+    save_route
+)
+
 from app.schemas.optimization import OptimizationRequest
 
 from app.optimization.qpso_solver import QPSOSolver
+
 from app.optimization.fitness import (
     calculate_fitness,
     decode_particle
@@ -11,7 +16,8 @@ from app.optimization.fitness import (
 
 from app.services.routing_service import (
     build_road_graph,
-    build_distance_matrix
+    build_distance_matrix,
+    build_route_geometry
 )
 
 from app.services.traffic_service import (
@@ -30,10 +36,14 @@ def optimize_routes(request: OptimizationRequest):
     vehicles = request.vehicles
 
     if not customers:
-        raise ValueError("At least one customer is required")
+        raise ValueError(
+            "At least one customer is required"
+        )
 
     if not vehicles:
-        raise ValueError("At least one vehicle is required")
+        raise ValueError(
+            "At least one vehicle is required"
+        )
 
     customer_demands = [
         customer.demand
@@ -72,7 +82,9 @@ def optimize_routes(request: OptimizationRequest):
         for customer in customers
     ]
 
-    db_customers = get_customers_by_ids(customer_ids)
+    db_customers = get_customers_by_ids(
+        customer_ids
+    )
 
     customer_coordinates = {}
 
@@ -85,10 +97,10 @@ def optimize_routes(request: OptimizationRequest):
             "longitude": float(row[6])
         }
 
-    # Make sure every requested customer exists in database
     for customer_id in customer_ids:
 
         if customer_id not in customer_coordinates:
+
             raise ValueError(
                 f"Customer {customer_id} coordinates not found"
             )
@@ -97,22 +109,27 @@ def optimize_routes(request: OptimizationRequest):
     # 3. Depot
     # =========================================================
 
-    # Current prototype depot.
-    # Later this will come from the frontend request.
+    # Depot coordinates are now received from frontend
+    # through OptimizationRequest.
 
-    depot_latitude = 12.9716
-    depot_longitude = 77.5946
+    depot_latitude = float(
+        request.depot.latitude
+    )
+
+    depot_longitude = float(
+        request.depot.longitude
+    )
 
     # =========================================================
     # 4. Build locations
     # =========================================================
 
-    # Matrix indexing:
+    # Matrix:
     #
     # 0 = depot
-    # 1 = first customer
-    # 2 = second customer
-    # 3 = third customer
+    # 1 = customer 0
+    # 2 = customer 1
+    # 3 = customer 2
     # ...
 
     locations = [
@@ -136,7 +153,7 @@ def optimize_routes(request: OptimizationRequest):
         )
 
     # =========================================================
-    # 5. Build OSM road graph
+    # 5. Build road graph
     # =========================================================
 
     graph = build_road_graph(
@@ -158,11 +175,6 @@ def optimize_routes(request: OptimizationRequest):
     # 7. Traffic context
     # =========================================================
 
-    # Current prototype traffic context.
-    #
-    # Later these values can come from:
-    # frontend / live traffic API / database.
-
     traffic_context = {
         "day_of_week": "Monday",
         "hour": 20,
@@ -175,7 +187,7 @@ def optimize_routes(request: OptimizationRequest):
     }
 
     # =========================================================
-    # 8. Build LightGBM travel-time matrix
+    # 8. LightGBM travel-time matrix
     # =========================================================
 
     travel_time_matrix = build_travel_time_matrix(
@@ -185,7 +197,7 @@ def optimize_routes(request: OptimizationRequest):
     )
 
     # =========================================================
-    # 9. Build traffic-cost matrix
+    # 9. Traffic-cost matrix
     # =========================================================
 
     traffic_cost_matrix = build_traffic_cost_matrix(
@@ -195,7 +207,7 @@ def optimize_routes(request: OptimizationRequest):
     )
 
     # =========================================================
-    # 10. Convert matrices to NumPy
+    # 10. Convert matrices to NumPy arrays
     # =========================================================
 
     distance_matrix = np.array(
@@ -214,7 +226,7 @@ def optimize_routes(request: OptimizationRequest):
     )
 
     # =========================================================
-    # 11. QPSO fitness function
+    # 11. Fitness function
     # =========================================================
 
     def fitness_function(particle):
@@ -251,8 +263,13 @@ def optimize_routes(request: OptimizationRequest):
 
     result = solver.solve()
 
-    best_solution = result["best_solution"]
-    best_fitness = result["best_fitness"]
+    best_solution = result[
+        "best_solution"
+    ]
+
+    best_fitness = result[
+        "best_fitness"
+    ]
 
     # =========================================================
     # 13. Decode optimized solution
@@ -265,7 +282,7 @@ def optimize_routes(request: OptimizationRequest):
     )
 
     # =========================================================
-    # 14. Prepare route results
+    # 14. Build route results
     # =========================================================
 
     optimized_routes = []
@@ -277,64 +294,34 @@ def optimize_routes(request: OptimizationRequest):
 
     for route in routes:
 
+        # -----------------------------------------------------
+        # Route metrics
+        # -----------------------------------------------------
+
         route_distance = 0.0
         route_time = 0.0
         route_traffic_cost = 0.0
 
-        route_path = []
-
-        # Start at depot
-        route_path.append(
-            [
-                depot_latitude,
-                depot_longitude
-            ]
-        )
-
         previous_node = 0
-
-        # -----------------------------------------------------
-        # Visit customers
-        # -----------------------------------------------------
 
         for customer_index in route.customers:
 
             matrix_node = customer_index + 1
 
-            # Distance
             route_distance += distance_matrix[
                 previous_node,
                 matrix_node
             ]
 
-            # Travel time
             route_time += travel_time_matrix[
                 previous_node,
                 matrix_node
             ]
 
-            # Traffic cost
             route_traffic_cost += traffic_cost_matrix[
                 previous_node,
                 matrix_node
             ]
-
-            # Customer information
-            customer = customers[customer_index]
-
-            customer_id = customer.node_id
-
-            coordinates = customer_coordinates[
-                customer_id
-            ]
-
-            # Add coordinate to frontend route
-            route_path.append(
-                [
-                    coordinates["latitude"],
-                    coordinates["longitude"]
-                ]
-            )
 
             previous_node = matrix_node
 
@@ -359,21 +346,30 @@ def optimize_routes(request: OptimizationRequest):
                 0
             ]
 
-            route_path.append(
-                [
-                    depot_latitude,
-                    depot_longitude
-                ]
-            )
+        # -----------------------------------------------------
+        # Route geometry
+        # -----------------------------------------------------
+
+        route_path = build_route_geometry(
+            graph,
+            locations,
+            route.customers
+        )
 
         # -----------------------------------------------------
-        # Route demand
+        # Demand
         # -----------------------------------------------------
 
         route_demand = sum(
-            customer_demands[customer_index]
+            customer_demands[
+                customer_index
+            ]
             for customer_index in route.customers
         )
+
+        # -----------------------------------------------------
+        # Vehicle capacity
+        # -----------------------------------------------------
 
         vehicle_capacity = vehicle_capacities[
             route.vehicle_id
@@ -385,22 +381,61 @@ def optimize_routes(request: OptimizationRequest):
             else 0.0
         )
 
+        # -----------------------------------------------------
+        # Actual database vehicle ID
+        # -----------------------------------------------------
+
         vehicle_id = vehicles[
             route.vehicle_id
         ].vehicle_id
 
         # -----------------------------------------------------
-        # Store route
+        # Actual database customer IDs
+        # -----------------------------------------------------
+
+        customer_sequence = [
+            customers[
+                customer_index
+            ].node_id
+            for customer_index in route.customers
+        ]
+
+        # -----------------------------------------------------
+        # Save route to PostgreSQL
+        # -----------------------------------------------------
+
+        route_id = None
+
+        if route.customers:
+
+            route_id = save_route(
+                vehicle_id=vehicle_id,
+                route_sequence=customer_sequence,
+                total_distance=float(
+                    route_distance
+                ),
+                total_time=float(
+                    route_time
+                ),
+                total_traffic_cost=float(
+                    route_traffic_cost
+                ),
+                fitness=float(
+                    best_fitness
+                )
+            )
+
+        # -----------------------------------------------------
+        # Frontend route response
         # -----------------------------------------------------
 
         optimized_routes.append(
             {
+                "route_id": route_id,
+
                 "vehicle_id": vehicle_id,
 
-                "customers": [
-                    customers[customer_index].node_id
-                    for customer_index in route.customers
-                ],
+                "customers": customer_sequence,
 
                 "path": route_path,
 
@@ -430,14 +465,17 @@ def optimize_routes(request: OptimizationRequest):
             }
         )
 
+        # -----------------------------------------------------
         # Overall totals
+        # -----------------------------------------------------
+
         total_distance += route_distance
         total_time += route_time
         total_traffic_cost += route_traffic_cost
         total_demand += route_demand
 
     # =========================================================
-    # 15. Overall dashboard metrics
+    # 15. Dashboard metrics
     # =========================================================
 
     vehicles_used = sum(
@@ -461,7 +499,7 @@ def optimize_routes(request: OptimizationRequest):
     )
 
     # =========================================================
-    # 16. Final frontend response
+    # 16. Final API response
     # =========================================================
 
     return {

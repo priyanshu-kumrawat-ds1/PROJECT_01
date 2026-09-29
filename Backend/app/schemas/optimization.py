@@ -2,6 +2,11 @@ from pydantic import BaseModel
 from typing import List
 
 
+class Depot(BaseModel):
+    latitude: float
+    longitude: float
+
+
 class Customer(BaseModel):
     node_id: int
     demand: float
@@ -16,6 +21,6 @@ class Vehicle(BaseModel):
 
 
 class OptimizationRequest(BaseModel):
-    depot: int
+    depot: Depot
     customers: List[Customer]
     vehicles: List[Vehicle]
