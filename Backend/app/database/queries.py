@@ -94,6 +94,30 @@ def add_customer(demand, earliest, latest, service_time, latitude, longitude):
             conn.commit()
 
             return customer_id
+    
+    finally:
+        conn.close()
+        
+def get_customers_by_ids(customer_ids):
+    conn = get_connection()
+
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    customer_id,
+                    demand,
+                    earliest,
+                    latest,
+                    service_time,
+                    ST_Y(location) AS latitude,
+                    ST_X(location) AS longitude
+                FROM customers
+                WHERE customer_id = ANY(%s)
+                ORDER BY customer_id;
+            """, (customer_ids,))
+
+            return cursor.fetchall()
 
     finally:
         conn.close()
