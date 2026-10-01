@@ -1,9 +1,6 @@
 import numpy as np
 
-from app.database.queries import (
-    get_customers_by_ids,
-    save_route
-)
+from app.database.queries import save_route
 
 from app.schemas.optimization import OptimizationRequest
 
@@ -74,43 +71,40 @@ def optimize_routes(request: OptimizationRequest):
     num_vehicles = len(vehicles)
 
     # =========================================================
-    # 2. Get customer coordinates from PostgreSQL/PostGIS
+    # 2. Get customer coordinates from FRONTEND
     # =========================================================
-
-    customer_ids = [
-        customer.node_id
-        for customer in customers
-    ]
-
-    db_customers = get_customers_by_ids(
-        customer_ids
-    )
+    #
+    # The frontend sends:
+    #
+    # {
+    #     "node_id": 1,
+    #     "latitude": 12.95,
+    #     "longitude": 77.59,
+    #     ...
+    # }
+    #
+    # Therefore we DO NOT query PostgreSQL for coordinates.
+    # This allows the user to select any location on the map.
+    # =========================================================
 
     customer_coordinates = {}
 
-    for row in db_customers:
+    for customer in customers:
 
-        customer_id = row[0]
-
-        customer_coordinates[customer_id] = {
-            "latitude": float(row[5]),
-            "longitude": float(row[6])
+        customer_coordinates[customer.node_id] = {
+            "latitude": float(customer.latitude),
+            "longitude": float(customer.longitude)
         }
-
-    for customer_id in customer_ids:
-
-        if customer_id not in customer_coordinates:
-
-            raise ValueError(
-                f"Customer {customer_id} coordinates not found"
-            )
 
     # =========================================================
     # 3. Depot
     # =========================================================
-
-    # Depot coordinates are now received from frontend
-    # through OptimizationRequest.
+    #
+    # Depot coordinates also come directly from frontend.
+    #
+    # User selects depot on the map.
+    # Frontend sends latitude + longitude.
+    # =========================================================
 
     depot_latitude = float(
         request.depot.latitude
@@ -123,7 +117,7 @@ def optimize_routes(request: OptimizationRequest):
     # =========================================================
     # 4. Build locations
     # =========================================================
-
+    #
     # Matrix:
     #
     # 0 = depot
@@ -131,6 +125,7 @@ def optimize_routes(request: OptimizationRequest):
     # 2 = customer 1
     # 3 = customer 2
     # ...
+    # =========================================================
 
     locations = [
         {
@@ -382,7 +377,7 @@ def optimize_routes(request: OptimizationRequest):
         )
 
         # -----------------------------------------------------
-        # Actual database vehicle ID
+        # Actual vehicle ID
         # -----------------------------------------------------
 
         vehicle_id = vehicles[
@@ -390,7 +385,7 @@ def optimize_routes(request: OptimizationRequest):
         ].vehicle_id
 
         # -----------------------------------------------------
-        # Actual database customer IDs
+        # Actual customer IDs
         # -----------------------------------------------------
 
         customer_sequence = [
@@ -512,6 +507,7 @@ def optimize_routes(request: OptimizationRequest):
         ),
 
         "summary": {
+
             "total_distance": float(
                 total_distance
             ),
