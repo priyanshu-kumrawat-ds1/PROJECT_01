@@ -9,6 +9,8 @@ class Depot(BaseModel):
 
 class Customer(BaseModel):
     node_id: int
+    latitude: float
+    longitude: float
     demand: float
     earliest: float
     latest: float
